@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>BATTLE 2048</title>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+
+body{
+  min-height:100vh;
+  background:#f0f0f8;
+  background-image:
+    /* grid lines */
+    linear-gradient(rgba(100,80,220,0.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(100,80,220,0.07) 1px, transparent 1px),
+    /* soft blobs */
+    radial-gradient(ellipse at 10% 20%, rgba(160,80,255,0.13) 0%, transparent 45%),
+    radial-gradient(ellipse at 90% 80%, rgba(255,60,160,0.13) 0%, transparent 45%),
+    radial-gradient(ellipse at 50% 50%, rgba(60,180,255,0.08) 0%, transparent 60%);
+  background-size: 38px 38px, 38px 38px, auto, auto, auto;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  padding:24px 20px;user-select:none;font-family:'Orbitron',monospace;
+}
+
+/* scanline overlay */
+body::before{
+  content:"";position:fixed;inset:0;pointer-events:none;z-index:0;
+  background:repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 3px,
+    rgba(80,60,180,0.025) 3px,
+    rgba(80,60,180,0.025) 4px
+  );
+}
+
+/* everything above scanlines */
+h1,.game{position:relative;z-index:1}
+
+@keyframes glw-light{
+  0%,100%{text-shadow:0 0 18px #cc00ff99, 0 0 40px #cc00ff44}
+  50%{text-shadow:0 0 30px #ff00aacc, 0 0 60px #ff00aa66}
+}
+@keyframes shine{0%{background-position:200% center}100%{background-position:-200% center}}
+@keyframes pop{from{transform:scale(0);opacity:0}60%{transform:scale(1.14)}to{transform:scale(1);opacity:1}}
+@keyframes bump{0%,100%{transform:scale(1)}40%{transform:scale(1.13)}}
+@keyframes shake{0%,100%{transform:translateX(0)}20%{transform:translateX(-9px)}40%{transform:translateX(9px)}60%{transform:translateX(-5px)}80%{transform:translateX(5px)}}
+@keyframes flash-red{0%,100%{box-shadow:var(--bs)}50%{box-shadow:0 0 60px #ff003399,0 0 20px #ff003355 inset}}
+@keyframes flash-shield{0%,100%{box-shadow:var(--bs)}50%{box-shadow:0 0 60px #00ff88bb,0 0 20px #00ff8844 inset}}
+@keyframes float-score{0%{transform:translateY(0) translateX(-50%);opacity:1}100%{transform:translateY(-65px) translateX(-50%);opacity:0}}
+@keyframes blk{0%,100%{opacity:1}50%{opacity:0.1}}
+@keyframes skill-in{from{transform:scale(0) rotate(-20deg);opacity:0}to{transform:scale(1) rotate(0)}}
+@keyframes neon-pulse{0%,100%{opacity:1}50%{opacity:0.7}}
+
+h1{
+  font-size:32px;font-weight:900;letter-spacing:14px;margin-bottom:22px;
+  background:linear-gradient(90deg,#6600ff,#cc00ff,#ff0099,#ff6600,#cc00ff,#6600ff);
+  background-size:300% auto;
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
+  animation:shine 3.5s linear infinite, glw-light 2.5s ease-in-out infinite;
+}
+
+.game{display:flex;gap:28px;align-items:flex-start}
+
+/* ── Panel ── */
+.panel{display:flex;flex-direction:column;align-items:center;gap:12px;min-width:400px}
+.panel-head{display:flex;align-items:center;gap:14px;width:100%}
+.p-name{font-size:24px;font-weight:900;letter-spacing:4px}
+.score-block{display:flex;flex-direction:column}
+.score-val{font-size:26px;font-weight:900;line-height:1}
+.score-lbl{font-size:8px;letter-spacing:3px;margin-top:2px;color:#aaa8cc}
+.best-val{font-size:10px;color:#c0bde0;margin-left:auto;text-align:right}
+.badges{display:flex;gap:6px;height:22px;align-items:center;width:100%}
+.badge{font-size:10px;padding:3px 9px;border-radius:12px;font-weight:bold;letter-spacing:1px}
+.badge.frozen{background:rgba(0,200,255,0.15);color:#00ccff;border:1.5px solid #00ccff66;animation:blk 0.7s infinite}
+.badge.shield{background:rgba(0,255,140,0.15);color:#00ff8c;border:1.5px solid #00ff8c66}
+
+/* ── Board ── */
+.board-wrap{position:relative}
+.board{
+  display:grid;
+  grid-template-columns:repeat(4,112px);
+  grid-template-rows:repeat(4,112px);
+  gap:10px;padding:12px;border-radius:16px;
+  background:rgba(255,255,255,0.72);
+  backdrop-filter:blur(8px);
+  border:2px solid var(--pc);
+  box-shadow:var(--bs), 0 8px 32px rgba(100,60,200,0.10);
+  transition:box-shadow 0.2s;
+}
+.board.shake{animation:shake 0.35s ease}
+.board.flash-hit{animation:flash-red 0.42s ease}
+.board.flash-shield{animation:flash-shield 0.5s ease}
+
+.cell{
+  width:112px;height:112px;border-radius:10px;
+  display:flex;align-items:center;justify-content:center;
+  font-weight:900;letter-spacing:1px;
+  background:rgba(200,195,230,0.35);
+  border:1.5px solid rgba(160,140,220,0.18);
+  transition:background 0.07s,box-shadow 0.07s;
+  position:relative;
+}
+.cell.new{animation:pop 0.16s ease forwards}
+.cell.bump{animation:bump 0.13s ease}
+
+/* Neon tiles on light bg — vivid strokes + glow */
+.cell[data-v="2"]   {background:rgba(80,140,255,0.12);border-color:#4488ffaa;color:#2255dd;box-shadow:0 0 12px #4488ff44,inset 0 0 8px #4488ff11;font-size:34px}
+.cell[data-v="4"]   {background:rgba(0,210,130,0.12);border-color:#00d28299;color:#007a4d;box-shadow:0 0 12px #00d28244,inset 0 0 8px #00d28211;font-size:34px}
+.cell[data-v="8"]   {background:rgba(255,120,30,0.12);border-color:#ff781eaa;color:#cc4400;box-shadow:0 0 12px #ff781e44,inset 0 0 8px #ff781e11;font-size:34px}
+.cell[data-v="16"]  {background:rgba(170,0,255,0.10);border-color:#aa00ff99;color:#7700cc;box-shadow:0 0 14px #aa00ff44,inset 0 0 8px #aa00ff11;font-size:30px}
+.cell[data-v="32"]  {background:rgba(255,0,110,0.10);border-color:#ff006eaa;color:#cc0055;box-shadow:0 0 14px #ff006e44,inset 0 0 8px #ff006e11;font-size:30px}
+.cell[data-v="64"]  {background:rgba(0,210,240,0.12);border-color:#00d2f099;color:#007799;box-shadow:0 0 14px #00d2f044,inset 0 0 8px #00d2f011;font-size:30px}
+.cell[data-v="128"] {background:rgba(255,210,0,0.14);border-color:#ffd200aa;color:#886600;box-shadow:0 0 16px #ffd20055,inset 0 0 8px #ffd20011;font-size:26px}
+.cell[data-v="256"] {background:rgba(255,100,0,0.12);border-color:#ff6400aa;color:#993300;box-shadow:0 0 16px #ff640044,inset 0 0 8px #ff640011;font-size:26px}
+.cell[data-v="512"] {background:rgba(0,255,100,0.12);border-color:#00ff6499;color:#006633;box-shadow:0 0 16px #00ff6444,inset 0 0 8px #00ff6411;font-size:26px}
+.cell[data-v="1024"]{background:rgba(255,0,200,0.12);border-color:#ff00c8aa;color:#aa0088;box-shadow:0 0 20px #ff00c855,inset 0 0 10px #ff00c811;font-size:20px}
+.cell[data-v="2048"]{background:rgba(255,220,0,0.2); border-color:#ffdc00;  color:#664400;box-shadow:0 0 30px #ffdc0099,inset 0 0 12px #ffdc0033;font-size:20px;animation:glw-light 1.5s infinite}
+
+.cell.sk-cell{font-size:32px;border-width:2px;animation:skill-in 0.2s ease forwards}
+.row-clear{background:rgba(255,220,0,0.35)!important;transition:background 0.05s!important}
+
+.float-score{
+  position:absolute;pointer-events:none;font-size:20px;font-weight:900;
+  animation:float-score 0.9s ease forwards;z-index:20;left:50%;top:38%;
+}
+
+.overlay{
+  position:absolute;inset:0;
+  background:rgba(240,238,255,0.93);
+  border-radius:14px;display:none;flex-direction:column;
+  align-items:center;justify-content:center;gap:10px;
+  backdrop-filter:blur(4px);
+}
+.overlay.show{display:flex}
+.overlay-title{font-size:18px;font-weight:900;letter-spacing:3px;color:#ff0055;
+  text-shadow:0 0 16px #ff005566}
+
+/* ── Skills ── */
+.skill-bar{display:flex;gap:8px;width:100%}
+.sk-btn{
+  flex:1;height:80px;border-radius:10px;cursor:pointer;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;
+  background:rgba(255,255,255,0.5);
+  border:1.5px solid rgba(160,140,220,0.25);
+  transition:all 0.15s;position:relative;
+  backdrop-filter:blur(4px);
+}
+.sk-btn.filled:hover{filter:brightness(1.08);transform:translateY(-3px);box-shadow:0 8px 20px rgba(100,60,200,0.15)}
+.sk-btn .sk-icon{font-size:26px;line-height:1}
+.sk-btn .sk-name{font-size:9px;font-weight:bold;letter-spacing:1px}
+.sk-btn .sk-key{font-size:9px;color:#b0acd0}
+.sk-btn .sk-dot{
+  position:absolute;top:5px;right:6px;width:8px;height:8px;
+  border-radius:50%;background:#ff0099;box-shadow:0 0 6px #ff0099;
+  animation:blk 0.7s infinite;
+}
+
+/* ── MID ── */
+.mid{
+  display:flex;flex-direction:column;align-items:center;
+  gap:16px;padding-top:54px;width:160px;flex-shrink:0;
+}
+.vs{
+  font-size:28px;font-weight:900;letter-spacing:6px;
+  background:linear-gradient(135deg,#cc00ff,#ff0099);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
+  opacity:0.22;
+}
+.sk-legend{width:100%;display:flex;flex-direction:column;gap:9px}
+.sk-leg-row{display:flex;align-items:flex-start;gap:7px}
+.sk-leg-row .ico{font-size:14px;margin-top:1px;flex-shrink:0}
+.sk-leg-row .nm{font-size:9px;font-weight:bold;letter-spacing:1px;line-height:1.3}
+.sk-leg-row .ds{font-size:8px;color:#a0a0c0;line-height:1.4}
+
+.start-wrap{display:flex;flex-direction:column;align-items:center;gap:14px;text-align:center}
+.ctrl-box{color:#9090b8;font-size:9px;line-height:2.2;text-align:left;width:100%}
+.ctrl-head{font-size:8px;letter-spacing:3px;margin-bottom:2px}
+.hint{font-size:8px;color:#b0b0cc;line-height:2;text-align:center}
+.result-wrap{display:flex;flex-direction:column;align-items:center;gap:12px;animation:pop 0.3s ease}
+.divider{width:100%;height:1px;background:rgba(140,120,220,0.15)}
+
+button{
+  padding:12px 28px;background:transparent;
+  border:2px solid;font-family:'Orbitron',monospace;font-size:12px;
+  letter-spacing:4px;cursor:pointer;border-radius:8px;transition:all 0.2s;
+  border-image:linear-gradient(90deg,#6600ff,#ff0099) 1;
+  color:#8800ff;
+  box-shadow:0 0 18px rgba(140,0,255,0.18);
+}
+button:hover{
+  background:rgba(140,0,255,0.07);
+  box-shadow:0 0 32px rgba(140,0,255,0.32);
+  transform:translateY(-2px);
+}
+</style>
+</head>
+<body>
+<h1>BATTLE 2048</h1>
+<div class="game">
+
+  <!-- P1 -->
+  <div class="panel">
+    <div class="panel-head">
+      <span class="p-name" style="color:#5500ff;text-shadow:0 0 16px #5500ff88">P1</span>
+      <div class="score-block">
+        <span class="score-val" id="sc0" style="color:#5500ff">0</span>
+        <span class="score-lbl">SCORE</span>
+      </div>
+      <span class="best-val" id="bs0">BEST 0</span>
+    </div>
+    <div class="badges" id="bdg0"></div>
+    <div class="board-wrap">
+      <div class="board" id="b0" style="--pc:#6622ffaa;--bs:0 0 28px rgba(102,0,255,0.18)"></div>
+      <div class="overlay" id="ov0">
+        <div class="overlay-title">GAME OVER</div>
+        <div id="ov0sc" style="font-size:13px;color:#8888aa;font-family:'Orbitron',monospace"></div>
+      </div>
+    </div>
+    <div class="skill-bar" id="skb0"></div>
+  </div>
+
+  <!-- MID -->
+  <div class="mid">
+    <div class="vs">VS</div>
+    <div id="mid"></div>
+  </div>
+
+  <!-- P2 -->
+  <div class="panel">
+    <div class="panel-head">
+      <span class="p-name" style="color:#ff0077;text-shadow:0 0 16px #ff007788">P2</span>
+      <div class="score-block">
+        <span class="score-val" id="sc1" style="color:#ff0077">0</span>
+        <span class="score-lbl">SCORE</span>
+      </div>
+      <span class="best-val" id="bs1">BEST 0</span>
+    </div>
+    <div class="badges" id="bdg1"></div>
+    <div class="board-wrap">
+      <div class="board" id="b1" style="--pc:#ff0077aa;--bs:0 0 28px rgba(255,0,120,0.18)"></div>
+      <div class="overlay" id="ov1">
+        <div class="overlay-title">GAME OVER</div>
+        <div id="ov1sc" style="font-size:13px;color:#8888aa;font-family:'Orbitron',monospace"></div>
+      </div>
+    </div>
+    <div class="skill-bar" id="skb1"></div>
+  </div>
+
+</div>
+
+<script>
+const SIZE=4,MAX_SK=3;
+const PCOLOR=["#5500ff","#ff0077"];
+const SK_KEYS=[["Z","X","C"],["J","K","L"]];
+
+const SKILLS={
+  BOMB:  {e:"💥",name:"BOMB",   desc:"Destroy 3 random enemy tiles",color:"#ff0055",atk:true},
+  SWEEP: {e:"🧹",name:"SWEEP",  desc:"Clear enemy's fullest row",    color:"#0099ff",atk:true},
+  FREEZE:{e:"❄️",name:"FREEZE", desc:"Enemy's next move is skipped", color:"#00ccff",atk:true},
+  CHAOS: {e:"🌀",name:"CHAOS",  desc:"Randomly shuffle enemy board", color:"#aa00ff",atk:true},
+  DOUBLE:{e:"⬆️",name:"DOUBLE", desc:"Double your highest tile",     color:"#ff9900",atk:false},
+  SHIELD:{e:"🛡️",name:"SHIELD", desc:"Block the next skill attack",  color:"#00cc77",atk:false},
+};
+const SK=Object.keys(SKILLS);
+
+const empty4=()=>Array.from({length:SIZE},()=>Array(SIZE).fill(0));
+
+function emptyCells(g){
+  const c=[];
+  for(let r=0;r<SIZE;r++) for(let c2=0;c2<SIZE;c2++) if(!g[r][c2]) c.push([r,c2]);
+  return c;
+}
+function spawnTile(g){
+  const cells=emptyCells(g);if(!cells.length)return null;
+  const[r,c]=cells[Math.floor(Math.random()*cells.length)];
+  if(Math.random()<0.13) g[r][c]="SK:"+SK[Math.floor(Math.random()*SK.length)];
+  else g[r][c]=Math.random()<0.82?2:4;
+  return[r,c];
+}
+function slideLeft(line){
+  let nums=line.filter(v=>typeof v==="number"&&v>0);
+  const sks=line.filter(v=>typeof v==="string");
+  let sc=0;
+  for(let i=0;i<nums.length-1;i++){
+    if(nums[i]===nums[i+1]){nums[i]*=2;sc+=nums[i];nums[i+1]=0;}
+  }
+  nums=nums.filter(v=>v>0);
+  const all=[...nums,...sks];
+  while(all.length<SIZE) all.push(0);
+  return{line:all,score:sc};
+}
+function rotCW(g){
+  return Array.from({length:SIZE},(_,r)=>Array.from({length:SIZE},(_,c)=>g[SIZE-1-c][r]));
+}
+function move(grid,dir){
+  let g=grid.map(r=>[...r]);
+  const n={left:0,right:2,up:3,down:1}[dir]||0;
+  for(let i=0;i<n;i++) g=rotCW(g);
+  let sc=0,moved=false;
+  const gotSkills=[];
+  const newG=g.map(row=>{
+    const{line,score}=slideLeft(row);
+    if(JSON.stringify(row)!==JSON.stringify(line)) moved=true;
+    sc+=score;
+    for(let c=0;c<SIZE;c++){
+      if(typeof line[c]==="string"&&line[c].startsWith("SK:")){
+        if(c===0||(c>0&&typeof line[c-1]==="number"&&line[c-1]>0)){
+          gotSkills.push(line[c].slice(3));line[c]=0;
+        }
+      }
+    }
+    return line;
+  });
+  const back=(4-n)%4;let fg=newG;
+  for(let i=0;i<back;i++) fg=rotCW(fg);
+  return{grid:fg,score:sc,moved,skills:gotSkills};
+}
+function canMove(g){
+  for(let r=0;r<SIZE;r++) for(let c=0;c<SIZE;c++){
+    if(!g[r][c])return true;
+    if(c<SIZE-1&&g[r][c]===g[r][c+1])return true;
+    if(r<SIZE-1&&g[r][c]===g[r+1][c])return true;
+  }
+  return false;
+}
+function checkClearRows(g0){
+  const g=g0.map(r=>[...r]);
+  const cleared=[],skills=[];let sc=0;
+  for(let r=0;r<SIZE;r++){
+    if(g[r].every(v=>v!==0)){
+      g[r].forEach(v=>{
+        if(typeof v==="string"&&v.startsWith("SK:")) skills.push(v.slice(3));
+        else if(typeof v==="number") sc+=v;
+      });
+      g[r]=Array(SIZE).fill(0);cleared.push(r);
+    }
+  }
+  return{g,score:sc,skills,cleared};
+}
+
+let P,status="idle",winner=null;
+function mkPlayer(){
+  const g=empty4();spawnTile(g);spawnTile(g);
+  return{grid:g,score:0,best:0,skills:[],shield:false,frozen:false,gameOver:false,newSkIdx:[]};
+}
+function startGame(){
+  P=[mkPlayer(),mkPlayer()];
+  status="playing";winner=null;
+  render();renderMid();
+}
+function doMove(pi,dir){
+  if(status!=="playing")return;
+  const pl=P[pi];if(pl.gameOver)return;
+  if(pl.frozen){pl.frozen=false;renderBoard(pi);return;}
+  const{grid:ng,score:sc,moved,skills:got}=move(pl.grid,dir);
+  if(!moved)return;
+  pl.score+=sc;
+  if(got.length){
+    const ol=pl.skills.length;
+    pl.skills=[...pl.skills,...got].slice(-MAX_SK);
+    got.forEach((_,i)=>pl.newSkIdx.push(Math.min(ol+i,MAX_SK-1)));
+  }
+  pl.grid=ng;
+  const{g:cg,score:csc,skills:csk,cleared}=checkClearRows(ng);
+  if(cleared.length){
+    flashRows(pi,cleared,csc);
+    pl.grid=cg;pl.score+=csc;
+    if(csk.length){
+      const ol=pl.skills.length;
+      pl.skills=[...pl.skills,...csk].slice(-MAX_SK);
+      csk.forEach((_,i)=>pl.newSkIdx.push(Math.min(ol+i,MAX_SK-1)));
+    }
+    for(let i=0;i<cleared.length;i++) spawnTile(pl.grid);
+  } else spawnTile(pl.grid);
+  if(pl.score>pl.best) pl.best=pl.score;
+  if(!canMove(pl.grid)){
+    pl.gameOver=true;status="gameover";
+    winner=P[0].score>P[1].score?0:P[1].score>P[0].score?1:-1;
+  }
+  render();
+  if(status==="gameover") renderMid();
+}
+function flashRows(pi,rows,score){
+  const bd=document.getElementById("b"+pi);
+  rows.forEach(r=>{
+    for(let c=0;c<SIZE;c++){
+      const cell=bd.children[r*SIZE+c];if(!cell)return;
+      cell.classList.add("row-clear");
+      setTimeout(()=>cell.classList.remove("row-clear"),260);
+    }
+  });
+  if(score>0){
+    const fp=document.createElement("div");
+    fp.className="float-score";
+    fp.style.cssText=`color:${PCOLOR[pi]};text-shadow:0 0 10px ${PCOLOR[pi]};`;
+    fp.textContent="+"+score.toLocaleString();
+    bd.parentElement.appendChild(fp);
+    setTimeout(()=>fp.remove(),950);
+  }
+}
+function useSkill(pi,idx){
+  if(status!=="playing")return;
+  const pl=P[pi],op=P[1-pi];
+  if(idx>=pl.skills.length)return;
+  const sk=pl.skills.splice(idx,1)[0];
+  pl.newSkIdx=pl.newSkIdx.filter(i=>i!==idx).map(i=>i>idx?i-1:i);
+  const def=SKILLS[sk];
+  const obd=document.getElementById("b"+(1-pi));
+  if(!def.atk){
+    if(sk==="SHIELD") pl.shield=true;
+    else if(sk==="DOUBLE"){
+      let mx=0,mr=-1,mc=-1;
+      for(let r=0;r<SIZE;r++) for(let c=0;c<SIZE;c++)
+        if(typeof pl.grid[r][c]==="number"&&pl.grid[r][c]>mx){mx=pl.grid[r][c];mr=r;mc=c;}
+      if(mr>=0){pl.grid[mr][mc]*=2;pl.score+=pl.grid[mr][mc];}
+    }
+  } else {
+    if(op.shield){
+      op.shield=false;
+      obd.classList.add("flash-shield");
+      setTimeout(()=>obd.classList.remove("flash-shield"),600);
+    } else {
+      obd.classList.add("flash-hit","shake");
+      setTimeout(()=>obd.classList.remove("flash-hit","shake"),420);
+      if(sk==="BOMB"){
+        const cells=[];
+        for(let r=0;r<SIZE;r++) for(let c=0;c<SIZE;c++) if(op.grid[r][c])cells.push([r,c]);
+        for(let i=0;i<Math.min(3,cells.length);i++){
+          const j=Math.floor(Math.random()*cells.length);
+          const[r,c]=cells.splice(j,1)[0];op.grid[r][c]=0;
+        }
+      } else if(sk==="SWEEP"){
+        let best=-1,bv=-1;
+        for(let r=0;r<SIZE;r++){const f=op.grid[r].filter(v=>v).length;if(f>bv){bv=f;best=r;}}
+        if(best>=0) op.grid[best]=Array(SIZE).fill(0);
+      } else if(sk==="FREEZE"){
+        op.frozen=true;
+      } else if(sk==="CHAOS"){
+        const vals=[];
+        for(let r=0;r<SIZE;r++) for(let c=0;c<SIZE;c++) if(op.grid[r][c])vals.push(op.grid[r][c]);
+        for(let i=vals.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[vals[i],vals[j]]=[vals[j],vals[i]];}
+        let vi=0;
+        for(let r=0;r<SIZE;r++) for(let c=0;c<SIZE;c++) op.grid[r][c]=vi<vals.length?vals[vi++]:0;
+      }
+    }
+  }
+  render();
+}
+
+function renderBoard(pi){
+  const pl=P[pi];
+  const bd=document.getElementById("b"+pi);
+  bd.innerHTML="";
+  for(let r=0;r<SIZE;r++){
+    for(let c=0;c<SIZE;c++){
+      const v=pl.grid[r][c];
+      const div=document.createElement("div");
+      div.className="cell";
+      if(v&&typeof v==="number"){
+        div.dataset.v=v<=2048?v:"2048+";
+        div.textContent=v>=10000?v.toLocaleString():v;
+        div.classList.add("new");
+      } else if(typeof v==="string"&&v.startsWith("SK:")){
+        const sk=v.slice(3),sd=SKILLS[sk];
+        div.className="cell sk-cell";
+        div.style.cssText=`background:${sd.color}18;border-color:${sd.color}88;box-shadow:0 0 16px ${sd.color}44;`;
+        div.textContent=sd.e;
+      }
+      bd.appendChild(div);
+    }
+  }
+  document.getElementById("sc"+pi).textContent=pl.score.toLocaleString();
+  document.getElementById("bs"+pi).textContent="BEST "+pl.best.toLocaleString();
+  const bdg=document.getElementById("bdg"+pi);
+  bdg.innerHTML="";
+  if(pl.frozen) bdg.innerHTML+=`<span class="badge frozen">❄️ FROZEN — next move skipped</span>`;
+  if(pl.shield) bdg.innerHTML+=`<span class="badge shield">🛡️ SHIELD ACTIVE</span>`;
+  const ov=document.getElementById("ov"+pi);
+  if(pl.gameOver){
+    ov.classList.add("show");
+    document.getElementById("ov"+pi+"sc").textContent=pl.score.toLocaleString()+" pts";
+  } else ov.classList.remove("show");
+  const bar=document.getElementById("skb"+pi);
+  bar.innerHTML="";
+  for(let i=0;i<MAX_SK;i++){
+    const sk=pl.skills[i];
+    const div=document.createElement("div");
+    div.className="sk-btn"+(sk?" filled":"");
+    if(sk){
+      const sd=SKILLS[sk];
+      div.style.cssText=`background:${sd.color}14;border-color:${sd.color}66;box-shadow:0 0 14px ${sd.color}22;`;
+      const isNew=pl.newSkIdx.includes(i);
+      div.innerHTML=`
+        <span class="sk-icon">${sd.e}</span>
+        <span class="sk-name" style="color:${sd.color}">${sd.name}</span>
+        <span class="sk-key">[${SK_KEYS[pi][i]}]</span>
+        ${isNew?'<div class="sk-dot"></div>':""}`;
+      div.title=sd.desc;
+    } else {
+      div.innerHTML=`<span class="sk-key" style="color:#c0bcd8">[${SK_KEYS[pi][i]}]</span>`;
+    }
+    div.onclick=()=>useSkill(pi,i);
+    bar.appendChild(div);
+  }
+  pl.newSkIdx=[];
+}
+function render(){if(!P)return;renderBoard(0);renderBoard(1);}
+function renderMid(){
+  const el=document.getElementById("mid");
+  if(status==="idle"){
+    el.innerHTML=`<div class="start-wrap">
+      <div class="ctrl-box">
+        <div class="ctrl-head" style="color:#7744ff88">── PLAYER 1 ──</div>
+        W A S D &nbsp;&nbsp;&nbsp; Move<br>Z / X / C &nbsp; Skill 1/2/3
+        <div class="ctrl-head" style="color:#ff007788;margin-top:10px">── PLAYER 2 ──</div>
+        ↑ ↓ ← → &nbsp;&nbsp; Move<br>J / K / L &nbsp;&nbsp; Skill 1/2/3
+      </div>
+      <div class="divider"></div>
+      <div class="sk-legend">
+        ${SK.map(k=>`<div class="sk-leg-row"><span class="ico">${SKILLS[k].e}</span>
+          <div><div class="nm" style="color:${SKILLS[k].color}">${SKILLS[k].name}</div>
+          <div class="ds">${SKILLS[k].desc}</div></div></div>`).join("")}
+      </div>
+      <div class="divider"></div>
+      <div class="hint">Skill tiles appear on the board<br>Slide to edge to collect them<br>Fill a full row → clear + grab skills</div>
+      <button onclick="startGame()">START GAME</button>
+    </div>`;
+  } else if(status==="gameover"){
+    const wc=winner===-1?"#9900cc":PCOLOR[winner];
+    const wt=winner===-1?"DRAW!":"P"+(winner+1)+" WINS!";
+    el.innerHTML=`<div class="result-wrap">
+      <div style="font-size:18px;font-weight:900;color:${wc};text-shadow:0 0 20px ${wc}88;letter-spacing:3px">${wt}</div>
+      <div style="color:#9090b8;font-size:10px;line-height:2.2">
+        P1 — ${P[0].score.toLocaleString()} pts<br>
+        P2 — ${P[1].score.toLocaleString()} pts
+      </div>
+      <button onclick="startGame()">PLAY AGAIN</button>
+    </div>`;
+  } else {
+    el.innerHTML=`<div class="sk-legend">
+      ${SK.map(k=>`<div class="sk-leg-row"><span class="ico">${SKILLS[k].e}</span>
+        <div><div class="nm" style="color:${SKILLS[k].color}">${SKILLS[k].name}</div>
+        <div class="ds">${SKILLS[k].desc}</div></div></div>`).join("")}
+    </div>`;
+  }
+}
+
+const D0={w:"up",a:"left",s:"down",d:"right"};
+const D1={ArrowUp:"up",ArrowLeft:"left",ArrowDown:"down",ArrowRight:"right"};
+document.addEventListener("keydown",e=>{
+  if(status!=="playing"){
+    if(e.key===" "||e.key==="Enter"){e.preventDefault();startGame();}
+    return;
+  }
+  const k=e.key;
+  if(D0[k]){e.preventDefault();doMove(0,D0[k]);}
+  else if(D1[k]){e.preventDefault();doMove(1,D1[k]);}
+  else if(k==="z"||k==="Z")useSkill(0,0);
+  else if(k==="x"||k==="X")useSkill(0,1);
+  else if(k==="c"||k==="C")useSkill(0,2);
+  else if(k==="j"||k==="J")useSkill(1,0);
+  else if(k==="k"||k==="K")useSkill(1,1);
+  else if(k==="l"||k==="L")useSkill(1,2);
+});
+
+P=[mkPlayer(),mkPlayer()];
+renderMid();render();
+</script>
+</body>
+</html>
